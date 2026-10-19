@@ -31,7 +31,7 @@ Windows is not yet supported. See the stub at the bottom of the script.
 One-liner, no manual clone needed:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/<you>/dev-stack/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/rshingleton/dev-stack/main/install.sh | bash
 ```
 
 `install.sh` is the only thing safe to pipe into `bash` sight-unseen (it does nothing but clone/update the repo to `~/dev-stack` and hand off); everything else - packages, symlinks - lives in `setup-env.sh`, which `install.sh` runs for you. Re-running the one-liner later just pulls the latest and re-runs it, same idempotent behavior as running it locally.
@@ -39,14 +39,14 @@ curl -fsSL https://raw.githubusercontent.com/<you>/dev-stack/main/install.sh | b
 Override where it's cloned or which repo it pulls from with env vars:
 
 ```
-DEV_STACK_DIR=~/code/dev-stack DEV_STACK_REPO_URL=https://github.com/<you>/dev-stack.git \
-  curl -fsSL https://raw.githubusercontent.com/<you>/dev-stack/main/install.sh | bash
+DEV_STACK_DIR=~/code/dev-stack DEV_STACK_REPO_URL=https://github.com/rshingleton/dev-stack.git \
+  curl -fsSL https://raw.githubusercontent.com/rshingleton/dev-stack/main/install.sh | bash
 ```
 
 Or clone it yourself and skip the bootstrap entirely:
 
 ```
-git clone <this-repo-url> ~/dev-stack
+git clone https://github.com/rshingleton/dev-stack.git ~/dev-stack
 cd ~/dev-stack
 chmod +x setup-env.sh
 ./setup-env.sh

@@ -1,6 +1,6 @@
 #!/bin/bash
 # dev-stack bootstrap - safe to run via:
-#   curl -fsSL https://raw.githubusercontent.com/<you>/dev-stack/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/rshingleton/dev-stack/main/install.sh | bash
 #
 # This script's only job is to get the repo onto disk, then hand off
 # to its own setup-env.sh - which is where all the real provisioning
@@ -11,7 +11,7 @@
 #   DEV_STACK_DIR=~/code/dev-stack curl -fsSL .../install.sh | bash
 set -uo pipefail
 
-REPO_URL="${DEV_STACK_REPO_URL:-https://github.com/<you>/dev-stack.git}"
+REPO_URL="${DEV_STACK_REPO_URL:-https://github.com/rshingleton/dev-stack.git}"
 INSTALL_DIR="${DEV_STACK_DIR:-$HOME/dev-stack}"
 
 if ! command -v git >/dev/null 2>&1; then
