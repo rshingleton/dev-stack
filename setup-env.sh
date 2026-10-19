@@ -289,8 +289,13 @@ setup_web_tools() {
         fi
     done
 
-    ensure_line_in_file "$HOME/.profile" 'export PATH="$HOME/.npm-global/bin:$PATH"'
-    log "Added $npm_prefix/bin to PATH in ~/.profile (restart shell or 'source ~/.profile')"
+    local path_line='export PATH="$HOME/.npm-global/bin:$PATH"'
+    if grep -qxF "$path_line" "$HOME/.profile" 2>/dev/null; then
+        log "$npm_prefix/bin already on PATH in ~/.profile, skipping"
+    else
+        ensure_line_in_file "$HOME/.profile" "$path_line"
+        log "Added $npm_prefix/bin to PATH in ~/.profile (restart shell or 'source ~/.profile')"
+    fi
 }
 
 setup_web_tools
@@ -663,7 +668,8 @@ DEV_START_EOF
 setup_dev_start
 
 # -----------------------------------------------------------------
-# 8b. Shell completion for dev-stack / dev-start (subcommands + registered aliases)
+# 8b. Shell completion for dev-stack (subcommands + registered aliases)
+#     dev-start is a compatibility symlink only and gets no completion.
 #     Added to both ~/.bashrc and ~/.zshrc, guarded by a marker so
 #     re-running this script never stacks duplicate blocks.
 # -----------------------------------------------------------------
@@ -691,13 +697,13 @@ setup_dev_start_completion() {
             fi
             cat <<'COMPLETION'
 # >>> dev-start completion >>>
-_dev_start_complete() {
+_dev_stack_complete() {
     local cur names
     cur="${COMP_WORDS[COMP_CWORD]}"
     names="$(awk -F= '!/^#/ && NF>1 {print $1}' "$HOME/.config/dev-start/projects" 2>/dev/null)"
     COMPREPLY=( $(compgen -W "init list status pick remove export import ${names}" -- "$cur") )
 }
-complete -F _dev_start_complete dev-stack dev-start
+complete -F _dev_stack_complete dev-stack
 # <<< dev-start completion <<<
 COMPLETION
         } >> "$rc"
