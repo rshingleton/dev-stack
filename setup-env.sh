@@ -1,7 +1,7 @@
 #!/bin/bash
 # =====================================================================
 # setup-env.sh - Unified Development Stack Setup Script
-# Targets: macOS (Laptop), Red Hat (Workstation), Ubuntu (VPS)
+# Targets: macOS, Red Hat, Ubuntu
 # Windows support: not yet implemented, see stub at bottom.
 # =====================================================================
 #
@@ -365,7 +365,7 @@ setup_tmux
 #      dev-start myproject
 #    Aliases live in ~/.config/dev-start/projects, not in this script,
 #    so adding/removing a project never requires re-running setup-env.sh.
-#    Paths differ across the laptop/workstation/VPS, so this file is
+#    Paths differ from machine to machine, so this file is
 #    machine-local by design - `dev-start export` / `import <file>`
 #    move the list between machines, with paths fixed up by hand.
 #    Opens an "editor" window running nvim, plus a "claude-cli" split
@@ -402,7 +402,7 @@ CONFIG_DIR="$HOME/.config/dev-start"
 CONFIG_FILE="$CONFIG_DIR/projects"
 mkdir -p "$CONFIG_DIR"
 if [ ! -f "$CONFIG_FILE" ]; then
-    # Paths differ per machine (laptop/workstation/VPS), so this file is
+    # Paths differ per machine, so this file is
     # machine-local by design. Use export/import to move the list over
     # and fix paths by hand, rather than syncing this file as-is.
     cat > "$CONFIG_FILE" <<'CFG_HEADER'
@@ -650,6 +650,9 @@ else
 fi
 DEV_START_EOF
     chmod +x "$HOME/.local/bin/dev-start"
+    # dev-stack is an alias named after the repo; a symlink (rather than a
+    # shell alias) so it also works from scripts and non-interactive shells.
+    ln -sfn dev-start "$HOME/.local/bin/dev-stack"
     ensure_line_in_file "$HOME/.profile" 'export PATH="$HOME/.local/bin:$PATH"'
 }
 
@@ -690,7 +693,7 @@ _dev_start_complete() {
     names="$(awk -F= '!/^#/ && NF>1 {print $1}' "$HOME/.config/dev-start/projects" 2>/dev/null)"
     COMPREPLY=( $(compgen -W "init list status pick remove export import ${names}" -- "$cur") )
 }
-complete -F _dev_start_complete dev-start
+complete -F _dev_start_complete dev-start dev-stack
 # <<< dev-start completion <<<
 COMPLETION
         } >> "$rc"

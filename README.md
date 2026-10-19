@@ -1,12 +1,12 @@
 # dev-stack
 
-A unified development environment: a provisioning script plus the actual dotfiles it manages, for macOS (laptop), Red Hat (workstation), and Ubuntu (VPS). Clone this repo anywhere and run `setup-env.sh` to get the same nvim config, tmux setup, and project launcher on a new machine.
+A unified development environment: a provisioning script plus the actual dotfiles it manages, for macOS, Red Hat, and Ubuntu. Clone this repo anywhere and run `setup-env.sh` to get the same nvim config, tmux setup, and project launcher on a new machine.
 
 MIT licensed, see [LICENSE](./LICENSE).
 
 ## Prerequisites
 
-- **macOS**: [Homebrew](https://brew.sh) must already be installed. If it isn't, `setup-env.sh` just warns and skips package installation entirely, nothing else in the script depends on Homebrew, so dotfile linking and `dev-start` still work.
+- **macOS**: [Homebrew](https://brew.sh) must already be installed. If it isn't, `setup-env.sh` just warns and skips package installation entirely, nothing else in the script depends on Homebrew, so dotfile linking and `dev-stack` still work.
 - **RHEL / Ubuntu**: `dnf`/`apt-get` and `sudo` access, which any normal install already has.
 - `git` and `bash` on all three.
 
@@ -29,8 +29,8 @@ tmux/tmux.conf  tmux config (dotfile source of truth, symlinked to ~/.tmux.conf)
 - Installs global web tooling (`prettier`, `live-server`) to a user-owned npm prefix, not root.
 - Symlinks `~/.config/nvim` to this repo's `nvim/`, and `~/.tmux.conf` to `tmux/tmux.conf`. If a real (non-symlink) config already exists at either location, it's renamed to a timestamped `.bak` next to it first - **never deleted**, so a first run on a machine with its own hand-built config is safe; nothing is lost, you just end up with a `.bak` directory to compare against and discard once you're happy.
 - Keeps tmux on the factory-default `Ctrl+b` prefix intentionally, so it never collides with LazyVim's `Ctrl+h/j/k/l` pane navigation from `vim-tmux-navigator`, plus installs `tmux-persist`, `tmux-yank`, and `extrakto`.
-- Installs `~/.local/bin/dev-start`, a project launcher (see below).
-- Adds shell completion for `dev-start` to both `~/.bashrc` and `~/.zshrc`.
+- Installs `dev-stack` to `~/.local/bin`, a project launcher (see below), with `dev-start` kept as an alias.
+- Adds shell completion for `dev-stack` and `dev-start` to both `~/.bashrc` and `~/.zshrc`.
 
 Windows is not yet supported. See the stub at the bottom of the script.
 
@@ -60,24 +60,24 @@ chmod +x setup-env.sh
 ./setup-env.sh
 ```
 
-`setup-env.sh` finds its own location (`SCRIPT_DIR`), so both paths behave identically, there's no hardcoded path back to this machine. If you're setting this up for yourself rather than forking it, you'll likely want to replace `nvim/` and `tmux/tmux.conf` with your own config before running it, the LazyVim setup here (Perl LSP, debugger, test runner) is specific to this machine's workflow.
+`setup-env.sh` finds its own location (`SCRIPT_DIR`), so both paths behave identically, there are no hardcoded machine-specific paths. If you're setting this up for yourself rather than forking it, you'll likely want to replace `nvim/` and `tmux/tmux.conf` with your own config before running it, the LazyVim setup here (Perl LSP, debugger, test runner) is tailored to a Perl-centric workflow.
 
-## dev-start
+## dev-stack
 
-`dev-start` launches (or reattaches to) a tmux session for a project, with nvim, Claude Code, and a small shell all laid out for you. No project list is hardcoded in the script; aliases are registered per machine.
+`dev-stack` launches (or reattaches to) a tmux session for a project, with nvim, Claude Code, and a small shell all laid out for you. No project list is hardcoded in the script; aliases are registered per machine. `dev-start` is kept as an alias, so every command below works under either name.
 
 ```
-dev-start init <name> <path>   Register an alias for a project path
-dev-start list                 Show registered aliases
-dev-start status               Show which aliases are running, restorable, or neither
-dev-start pick                 Fuzzy-pick a registered alias and launch it (uses fzf if installed)
-dev-start remove <name>        Remove an alias
-dev-start export [file]        Print (or save) aliases, to move to another machine
-dev-start import <file>        Merge aliases from a file (fix paths afterward)
-dev-start [name-or-path] [session-name]
+dev-stack init <name> <path>   Register an alias for a project path
+dev-stack list                 Show registered aliases
+dev-stack status               Show which aliases are running, restorable, or neither
+dev-stack pick                 Fuzzy-pick a registered alias and launch it (uses fzf if installed)
+dev-stack remove <name>        Remove an alias
+dev-stack export [file]        Print (or save) aliases, to move to another machine
+dev-stack import <file>        Merge aliases from a file (fix paths afterward)
+dev-stack [name-or-path] [session-name]
 ```
 
-Aliases live in `~/.config/dev-start/projects`, a machine-local file (paths differ across the laptop/workstation/VPS, so this is deliberately **not** synced or committed). Use `export`/`import` to move the list between machines and fix the paths by hand.
+Aliases live in `~/.config/dev-start/projects`, a machine-local file (project paths differ from machine to machine, so this is deliberately **not** synced or committed). Use `export`/`import` to move the list between machines and fix the paths by hand.
 
 ### Layout
 
@@ -86,9 +86,9 @@ Each session gets one window with nvim, Claude Code, and an idle shell for git/c
 - **Vertical** (default): nvim on top, Claude Code in the middle, shell sliver at the bottom.
 - **Horizontal**: nvim on the left (full height), Claude Code top-right, shell sliver bottom-right.
 
-Set `DEV_START_LAYOUT=horizontal` to switch, e.g. `DEV_START_LAYOUT=horizontal dev-start myproject`.
+Set `DEV_START_LAYOUT=horizontal` to switch, e.g. `DEV_START_LAYOUT=horizontal dev-stack myproject`.
 
-`dev-start` also knows about `tmux-persist`: since persist auto-restores a session's saved layout the instant a session with a matching name is created, `dev-start` checks for an existing snapshot first and steps out of the way (just creating a bare session) rather than racing persist's restore with its own layout-building commands.
+`dev-stack` also knows about `tmux-persist`: since persist auto-restores a session's saved layout the instant a session with a matching name is created, `dev-stack` checks for an existing snapshot first and steps out of the way (just creating a bare session) rather than racing persist's restore with its own layout-building commands.
 
 ## Usage
 
