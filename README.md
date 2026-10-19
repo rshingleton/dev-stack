@@ -69,6 +69,7 @@ chmod +x setup-env.sh
 ```
 dev-start init <name> <path>   Register an alias for a project path
 dev-start list                 Show registered aliases
+dev-start status               Show which aliases are running, restorable, or neither
 dev-start pick                 Fuzzy-pick a registered alias and launch it (uses fzf if installed)
 dev-start remove <name>        Remove an alias
 dev-start export [file]        Print (or save) aliases, to move to another machine
