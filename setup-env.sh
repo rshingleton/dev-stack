@@ -66,11 +66,15 @@ link_dotfile() {
 }
 
 # -----------------------------------------------------------------
-# 1. Perl discovery (Perl Principle)
+# 1. Perl & Python discovery (same principle, applied to both)
 #    Never force a reinstall if a working binary is already
 #    discoverable. perl.lua's perlnavigator config uses perlPath =
 #    "perl", so whatever resolves on PATH is what LSP/prove/perltidy
-#    will use too.
+#    will use too. Same idea for Python: plenty of setups manage it
+#    via pyenv/perlbrew-style version managers instead of the OS
+#    package manager, and installing over that via brew/dnf/apt can
+#    silently change what `python3` resolves to system-wide (brew's
+#    `link` step will even overwrite existing python3/pip3 symlinks).
 # -----------------------------------------------------------------
 
 ACTIVE_PERL_BIN="$(command -v perl 2>/dev/null || true)"
@@ -79,6 +83,14 @@ if [ -n "$ACTIVE_PERL_BIN" ]; then
     log "Perl already available: $ACTIVE_PERL_BIN ($PERL_VERSION_STRING)"
 else
     warn "No perl binary discoverable on PATH yet. It will be installed below."
+fi
+
+ACTIVE_PYTHON_BIN="$(command -v python3 2>/dev/null || true)"
+if [ -n "$ACTIVE_PYTHON_BIN" ]; then
+    PYTHON_VERSION_STRING="$("$ACTIVE_PYTHON_BIN" --version 2>&1)"
+    log "Python already available: $ACTIVE_PYTHON_BIN ($PYTHON_VERSION_STRING)"
+else
+    warn "No python3 binary discoverable on PATH yet. It will be installed below."
 fi
 
 # -----------------------------------------------------------------
@@ -137,7 +149,7 @@ provision_macos() {
         return
     fi
 
-    local pkgs=(tmux neovim git lazygit fzf fd ripgrep go python3 node perl cpanminus)
+    local pkgs=(tmux neovim git lazygit fzf fd ripgrep go node)
     for pkg in "${pkgs[@]}"; do
         if brew list --versions "$pkg" >/dev/null 2>&1; then
             log "brew: $pkg already installed, skipping"
@@ -146,6 +158,23 @@ provision_macos() {
             brew install "$pkg"
         fi
     done
+
+    if [ -z "$ACTIVE_PERL_BIN" ]; then
+        log "No base Perl found. Installing perl + cpanminus via brew"
+        brew install perl cpanminus
+    elif ! have cpanm; then
+        log "Perl present but cpanm missing. Installing cpanminus via brew"
+        brew install cpanminus
+    else
+        log "Perl ($ACTIVE_PERL_BIN) and cpanm already present, skipping brew perl/cpanminus"
+    fi
+
+    if [ -z "$ACTIVE_PYTHON_BIN" ]; then
+        log "No base Python3 found. Installing python3 via brew"
+        brew install python3
+    else
+        log "Python3 ($ACTIVE_PYTHON_BIN) already present, skipping brew python3"
+    fi
 }
 
 provision_rhel() {
@@ -158,7 +187,7 @@ provision_rhel() {
 
     sudo dnf check-update || true
 
-    local pkgs=(tmux neovim lazygit fzf fd-find ripgrep gcc make golang python3 nodejs)
+    local pkgs=(tmux neovim lazygit fzf fd-find ripgrep gcc make golang nodejs)
     for pkg in "${pkgs[@]}"; do
         if rpm -q "$pkg" >/dev/null 2>&1; then
             log "dnf: $pkg already installed, skipping"
@@ -175,6 +204,16 @@ provision_rhel() {
         log "Perl present but cpanm missing. Installing perl-App-cpanminus"
         sudo dnf install -y perl-App-cpanminus
     fi
+
+    if [ -z "$ACTIVE_PYTHON_BIN" ]; then
+        log "No base Python3 found. Installing python3 + pip"
+        sudo dnf install -y python3 python3-pip
+    elif ! have pip3; then
+        log "Python3 present but pip3 missing. Installing python3-pip"
+        sudo dnf install -y python3-pip
+    else
+        log "Python3 ($ACTIVE_PYTHON_BIN) and pip3 already present, skipping dnf python3/pip"
+    fi
 }
 
 provision_ubuntu() {
@@ -187,7 +226,7 @@ provision_ubuntu() {
 
     sudo apt-get update -y
 
-    local pkgs=(tmux neovim lazygit fzf fd-find ripgrep build-essential golang-go python3 python3-pip nodejs npm)
+    local pkgs=(tmux neovim lazygit fzf fd-find ripgrep build-essential golang-go nodejs npm)
     for pkg in "${pkgs[@]}"; do
         if dpkg -s "$pkg" >/dev/null 2>&1; then
             log "apt: $pkg already installed, skipping"
@@ -203,6 +242,16 @@ provision_ubuntu() {
     elif ! have cpanm; then
         log "Perl present but cpanm missing. Installing cpanminus"
         sudo apt-get install -y cpanminus
+    fi
+
+    if [ -z "$ACTIVE_PYTHON_BIN" ]; then
+        log "No base Python3 found. Installing python3 + pip"
+        sudo apt-get install -y python3 python3-pip
+    elif ! have pip3; then
+        log "Python3 present but pip3 missing. Installing python3-pip"
+        sudo apt-get install -y python3-pip
+    else
+        log "Python3 ($ACTIVE_PYTHON_BIN) and pip3 already present, skipping apt python3/pip"
     fi
 }
 
