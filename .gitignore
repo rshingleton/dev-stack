@@ -1,0 +1,13 @@
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Editor cruft
+*.swp
+*~
+
+# Local test/scratch artifacts, if any end up here
+*.log
+
+# Backups setup-env.sh makes before replacing a real config with a symlink
+*.bak.*
