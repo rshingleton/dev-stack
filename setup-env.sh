@@ -20,7 +20,7 @@
 # files in this repo, not the symlink targets, and commit your
 # changes - that's what makes this reusable by anyone who clones it.
 #
-# dev-start takes a project path as an argument (dev-start [path]) -
+# dev-stack takes a project path as an argument (dev-stack [path]) -
 # there is no hardcoded project list to maintain.
 # =====================================================================
 
@@ -358,15 +358,15 @@ setup_tmux() {
 setup_tmux
 
 # -----------------------------------------------------------------
-# 8. Project workspace launcher (dev-start)
+# 8. Project workspace launcher (dev-stack, aliased as dev-start)
 #    No hardcoded project list in the script - projects are either
 #    passed as a path, or registered once as a named alias:
-#      dev-start init myproject /my/project/location
-#      dev-start myproject
+#      dev-stack init myproject /my/project/location
+#      dev-stack myproject
 #    Aliases live in ~/.config/dev-start/projects, not in this script,
 #    so adding/removing a project never requires re-running setup-env.sh.
 #    Paths differ from machine to machine, so this file is
-#    machine-local by design - `dev-start export` / `import <file>`
+#    machine-local by design - `dev-stack export` / `import <file>`
 #    move the list between machines, with paths fixed up by hand.
 #    Opens an "editor" window running nvim, plus a "claude-cli" split
 #    if the claude CLI is installed (matches the ai.claudecode LazyVim
@@ -375,20 +375,23 @@ setup_tmux
 
 setup_dev_start() {
     mkdir -p "$HOME/.local/bin"
-    log "Writing ~/.local/bin/dev-start"
+    log "Writing ~/.local/bin/dev-stack"
 
-    cat << 'DEV_START_EOF' > "$HOME/.local/bin/dev-start"
+    # Older installs had dev-stack as a symlink to dev-start; remove it so
+    # the write below creates a real file instead of following the link.
+    rm -f "$HOME/.local/bin/dev-stack"
+    cat << 'DEV_START_EOF' > "$HOME/.local/bin/dev-stack"
 #!/bin/bash
 # Managed by setup-env.sh - re-run the script to regenerate this file.
 # Usage:
-#   dev-start init <name> <path>   Register an alias for a project path
-#   dev-start list                 Show registered aliases
-#   dev-start status                Show which aliases are running / restorable
-#   dev-start pick                 Fuzzy-pick a registered alias and launch it
-#   dev-start remove <name>        Remove an alias
-#   dev-start export [file]        Print (or save) aliases, to move to another machine
-#   dev-start import <file>        Merge aliases from a file (fix paths after - see below)
-#   dev-start [name-or-path] [session-name]
+#   dev-stack init <name> <path>   Register an alias for a project path
+#   dev-stack list                 Show registered aliases
+#   dev-stack status                Show which aliases are running / restorable
+#   dev-stack pick                 Fuzzy-pick a registered alias and launch it
+#   dev-stack remove <name>        Remove an alias
+#   dev-stack export [file]        Print (or save) aliases, to move to another machine
+#   dev-stack import <file>        Merge aliases from a file (fix paths after - see below)
+#   dev-stack [name-or-path] [session-name]
 #       name-or-path defaults to the current directory if omitted.
 #       session-name defaults to the alias name (or the directory's
 #       basename, if you passed a plain path instead of an alias).
@@ -406,24 +409,24 @@ if [ ! -f "$CONFIG_FILE" ]; then
     # machine-local by design. Use export/import to move the list over
     # and fix paths by hand, rather than syncing this file as-is.
     cat > "$CONFIG_FILE" <<'CFG_HEADER'
-# dev-start project aliases - machine-local, not meant to be synced
-# across machines as-is (paths differ per host). Use `dev-start export`
-# and `dev-start import <file>` to carry the list over and fix paths.
-# One "name=/absolute/path" per line. Managed by `dev-start init`/`remove`.
+# dev-stack project aliases - machine-local, not meant to be synced
+# across machines as-is (paths differ per host). Use `dev-stack export`
+# and `dev-stack import <file>` to carry the list over and fix paths.
+# One "name=/absolute/path" per line. Managed by `dev-stack init`/`remove`.
 CFG_HEADER
 fi
 
 usage() {
     cat >&2 <<USAGE
 Usage:
-  dev-start init <name> <path>   Register an alias for a project path
-  dev-start list                 Show registered aliases
-  dev-start status                Show which aliases are running / restorable
-  dev-start pick                 Fuzzy-pick a registered alias and launch it
-  dev-start remove <name>        Remove an alias
-  dev-start export [file]        Print (or save) aliases, to move to another machine
-  dev-start import <file>        Merge aliases from a file (fix paths after)
-  dev-start [name-or-path] [session-name]
+  dev-stack init <name> <path>   Register an alias for a project path
+  dev-stack list                 Show registered aliases
+  dev-stack status                Show which aliases are running / restorable
+  dev-stack pick                 Fuzzy-pick a registered alias and launch it
+  dev-stack remove <name>        Remove an alias
+  dev-stack export [file]        Print (or save) aliases, to move to another machine
+  dev-stack import <file>        Merge aliases from a file (fix paths after)
+  dev-stack [name-or-path] [session-name]
 USAGE
     exit 1
 }
@@ -469,9 +472,9 @@ has_persist_snapshot() {
 
 cmd_init() {
     local name="${1:-}" path="${2:-}"
-    [ -n "$name" ] && [ -n "$path" ] || { echo "dev-start init: need a name and a path" >&2; usage; }
-    case "$name" in *=*) echo "dev-start init: name can't contain '='" >&2; exit 1 ;; esac
-    [ -d "$path" ] || { echo "dev-start init: '$path' is not a directory" >&2; exit 1; }
+    [ -n "$name" ] && [ -n "$path" ] || { echo "dev-stack init: need a name and a path" >&2; usage; }
+    case "$name" in *=*) echo "dev-stack init: name can't contain '='" >&2; exit 1 ;; esac
+    [ -d "$path" ] || { echo "dev-stack init: '$path' is not a directory" >&2; exit 1; }
     path="$(cd "$path" && pwd)"
 
     alias_drop "$name"   # idempotent: re-running init on the same name overwrites it
@@ -483,7 +486,7 @@ cmd_list() {
     local lines
     lines="$(valid_lines)"
     if [ -z "$lines" ]; then
-        echo "No projects registered yet. Use: dev-start init <name> <path>"
+        echo "No projects registered yet. Use: dev-stack init <name> <path>"
         return
     fi
     echo "$lines" | column -t -s= 2>/dev/null || echo "$lines"
@@ -493,11 +496,11 @@ cmd_pick() {
     local lines choice
     lines="$(valid_lines)"
     if [ -z "$lines" ]; then
-        echo "No projects registered yet. Use: dev-start init <name> <path>" >&2
+        echo "No projects registered yet. Use: dev-stack init <name> <path>" >&2
         exit 1
     fi
     if command -v fzf >/dev/null 2>&1; then
-        choice="$(echo "$lines" | awk -F= '{print $1}' | fzf --prompt='dev-start> ')"
+        choice="$(echo "$lines" | awk -F= '{print $1}' | fzf --prompt='dev-stack> ')"
     else
         echo "Registered projects:" >&2
         echo "$lines" | awk -F= '{print NR") "$1}' >&2
@@ -510,7 +513,7 @@ cmd_pick() {
 
 cmd_remove() {
     local name="${1:-}"
-    [ -n "$name" ] || { echo "dev-start remove: need a name" >&2; usage; }
+    [ -n "$name" ] || { echo "dev-stack remove: need a name" >&2; usage; }
     alias_drop "$name"
     echo "Removed '$name' (if it existed)"
 }
@@ -519,7 +522,7 @@ cmd_status() {
     local lines
     lines="$(valid_lines)"
     if [ -z "$lines" ]; then
-        echo "No projects registered yet. Use: dev-start init <name> <path>"
+        echo "No projects registered yet. Use: dev-stack init <name> <path>"
         return
     fi
 
@@ -550,7 +553,7 @@ cmd_export() {
 
 cmd_import() {
     local file="${1:-}" name path count=0 missing=0
-    [ -n "$file" ] && [ -f "$file" ] || { echo "dev-start import: need an existing file to import" >&2; usage; }
+    [ -n "$file" ] && [ -f "$file" ] || { echo "dev-stack import: need an existing file to import" >&2; usage; }
     while IFS='=' read -r name path; do
         case "$name" in ""|\#*) continue ;; esac
         [ -z "$path" ] && continue
@@ -558,7 +561,7 @@ cmd_import() {
         echo "${name}=${path}" >> "$CONFIG_FILE"
         count=$((count + 1))
         if [ ! -d "$path" ]; then
-            echo "  '$name' -> '$path' doesn't exist on this machine (fix with: dev-start init $name <path>)" >&2
+            echo "  '$name' -> '$path' doesn't exist on this machine (fix with: dev-stack init $name <path>)" >&2
             missing=$((missing + 1))
         fi
     done < "$file"
@@ -593,13 +596,13 @@ elif [ -d "$ARG" ]; then
     PROJECT_DIR="$ARG"
     DEFAULT_SESSION_NAME="$(basename "$PROJECT_DIR")"
 else
-    echo "dev-start: '$ARG' is not a registered alias or a directory" >&2
-    echo "Run 'dev-start list' to see aliases, or 'dev-start init $ARG <path>' to add one." >&2
+    echo "dev-stack: '$ARG' is not a registered alias or a directory" >&2
+    echo "Run 'dev-stack list' to see aliases, or 'dev-stack init $ARG <path>' to add one." >&2
     exit 1
 fi
 
 if [ ! -d "$PROJECT_DIR" ]; then
-    echo "dev-start: '$PROJECT_DIR' is not a directory" >&2
+    echo "dev-stack: '$PROJECT_DIR' is not a directory" >&2
     exit 1
 fi
 PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
@@ -614,7 +617,7 @@ SESSION_NAME="$(sanitize_session_name "${SESSION_OVERRIDE:-$DEFAULT_SESSION_NAME
 # exists for this session name, just create the bare session and let
 # persist's hook populate it; only build our own default layout when
 # there's nothing for persist to restore. (has_persist_snapshot and
-# PERSIST_DIR are defined above, shared with `dev-start status`.)
+# PERSIST_DIR are defined above, shared with `dev-stack status`.)
 
 if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
     echo "Session '$SESSION_NAME' already running."
@@ -649,17 +652,18 @@ else
     tmux attach-session -t "$SESSION_NAME"
 fi
 DEV_START_EOF
-    chmod +x "$HOME/.local/bin/dev-start"
-    # dev-stack is an alias named after the repo; a symlink (rather than a
-    # shell alias) so it also works from scripts and non-interactive shells.
-    ln -sfn dev-start "$HOME/.local/bin/dev-stack"
+    chmod +x "$HOME/.local/bin/dev-stack"
+    # dev-start is kept as an alias for the original name; a symlink (rather
+    # than a shell alias) so it also works from scripts and non-interactive
+    # shells. -f replaces the real dev-start file older installs wrote.
+    ln -sfn dev-stack "$HOME/.local/bin/dev-start"
     ensure_line_in_file "$HOME/.profile" 'export PATH="$HOME/.local/bin:$PATH"'
 }
 
 setup_dev_start
 
 # -----------------------------------------------------------------
-# 8b. Shell completion for dev-start (subcommands + registered aliases)
+# 8b. Shell completion for dev-stack / dev-start (subcommands + registered aliases)
 #     Added to both ~/.bashrc and ~/.zshrc, guarded by a marker so
 #     re-running this script never stacks duplicate blocks.
 # -----------------------------------------------------------------
@@ -679,7 +683,7 @@ setup_dev_start_completion() {
             rm -f "$rc.bak"
         fi
 
-        log "Updating dev-start completion in $(basename "$rc")"
+        log "Updating dev-stack completion in $(basename "$rc")"
         {
             echo ""
             if [ "$rc" = "$HOME/.zshrc" ]; then
@@ -693,7 +697,7 @@ _dev_start_complete() {
     names="$(awk -F= '!/^#/ && NF>1 {print $1}' "$HOME/.config/dev-start/projects" 2>/dev/null)"
     COMPREPLY=( $(compgen -W "init list status pick remove export import ${names}" -- "$cur") )
 }
-complete -F _dev_start_complete dev-start dev-stack
+complete -F _dev_start_complete dev-stack dev-start
 # <<< dev-start completion <<<
 COMPLETION
         } >> "$rc"
@@ -735,9 +739,9 @@ install_tmux_plugins
 # -----------------------------------------------------------------
 # TODO: setup-env.ps1
 #   - winget/scoop installs for neovim, git, go, python, node
-#   - WSL2 + Ubuntu distro for tmux, perl toolchain, dev-start
+#   - WSL2 + Ubuntu distro for tmux, perl toolchain, dev-stack
 #   - Reuse this script's OS_FAMILY=ubuntu path *inside* WSL
 
 echo "Environment setup complete for OS family: $OS_FAMILY"
 echo "Perl binary in use: ${ACTIVE_PERL_BIN:-$(command -v perl 2>/dev/null || echo 'still not found')}"
-echo "Run 'dev-start' to launch your tmux project sessions."
+echo "Run 'dev-stack' to launch your tmux project sessions."

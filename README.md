@@ -29,7 +29,7 @@ tmux/tmux.conf  tmux config (dotfile source of truth, symlinked to ~/.tmux.conf)
 - Installs global web tooling (`prettier`, `live-server`) to a user-owned npm prefix, not root.
 - Symlinks `~/.config/nvim` to this repo's `nvim/`, and `~/.tmux.conf` to `tmux/tmux.conf`. If a real (non-symlink) config already exists at either location, it's renamed to a timestamped `.bak` next to it first - **never deleted**, so a first run on a machine with its own hand-built config is safe; nothing is lost, you just end up with a `.bak` directory to compare against and discard once you're happy.
 - Keeps tmux on the factory-default `Ctrl+b` prefix intentionally, so it never collides with LazyVim's `Ctrl+h/j/k/l` pane navigation from `vim-tmux-navigator`, plus installs `tmux-persist`, `tmux-yank`, and `extrakto`.
-- Installs `dev-stack` to `~/.local/bin`, a project launcher (see below), with `dev-start` kept as an alias.
+- Installs `~/.local/bin/dev-stack`, a project launcher (see below), with `dev-start` kept as a symlink to it.
 - Adds shell completion for `dev-stack` and `dev-start` to both `~/.bashrc` and `~/.zshrc`.
 
 Windows is not yet supported. See the stub at the bottom of the script.
