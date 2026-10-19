@@ -383,6 +383,7 @@ setup_dev_start() {
 # Usage:
 #   dev-start init <name> <path>   Register an alias for a project path
 #   dev-start list                 Show registered aliases
+#   dev-start status                Show which aliases are running / restorable
 #   dev-start pick                 Fuzzy-pick a registered alias and launch it
 #   dev-start remove <name>        Remove an alias
 #   dev-start export [file]        Print (or save) aliases, to move to another machine
@@ -417,6 +418,7 @@ usage() {
 Usage:
   dev-start init <name> <path>   Register an alias for a project path
   dev-start list                 Show registered aliases
+  dev-start status                Show which aliases are running / restorable
   dev-start pick                 Fuzzy-pick a registered alias and launch it
   dev-start remove <name>        Remove an alias
   dev-start export [file]        Print (or save) aliases, to move to another machine
@@ -438,6 +440,31 @@ alias_drop() {
 # Real alias lines only - skips comments and blanks (both have no '=', so NF==1).
 valid_lines() {
     awk -F= '!/^#/ && NF>1' "$CONFIG_FILE"
+}
+
+# tmux session names can't contain '.' or ':' - same sanitization used
+# both when launching and when checking status, so the two agree on
+# what a given alias's session is actually named.
+sanitize_session_name() {
+    local n="$1"
+    echo "${n//[.:]/_}"
+}
+
+# tmux-persist auto-restores on its `session-created` hook, async, the
+# instant a session with a matching snapshot name is created - and
+# since a brand-new session always starts with exactly 1 pane, persist
+# will overwrite that pane if a snapshot exists. Building our own
+# layout at the same time would race it, so the main launch path below
+# checks this before deciding what to do. `status` also uses it, to
+# show which non-running aliases could still be restored.
+PERSIST_DIR="$(tmux show-option -gqv @persist-dir 2>/dev/null)"
+PERSIST_DIR="${PERSIST_DIR:-$HOME/.tmux/persist}"
+PERSIST_DIR="${PERSIST_DIR/#\~/$HOME}"
+
+has_persist_snapshot() {
+    local session="$1"
+    [ -d "$PERSIST_DIR" ] || return 1
+    compgen -G "$PERSIST_DIR/${session}_*" > /dev/null 2>&1
 }
 
 cmd_init() {
@@ -488,6 +515,24 @@ cmd_remove() {
     echo "Removed '$name' (if it existed)"
 }
 
+cmd_status() {
+    local lines
+    lines="$(valid_lines)"
+    if [ -z "$lines" ]; then
+        echo "No projects registered yet. Use: dev-start init <name> <path>"
+        return
+    fi
+
+    printf '%-20s %-9s %-10s %s\n' "NAME" "RUNNING" "SNAPSHOT" "PATH"
+    while IFS='=' read -r name path; do
+        local sess running snap
+        sess="$(sanitize_session_name "$name")"
+        if tmux has-session -t "$sess" 2>/dev/null; then running="yes"; else running="no"; fi
+        if has_persist_snapshot "$sess"; then snap="yes"; else snap="no"; fi
+        printf '%-20s %-9s %-10s %s\n' "$name" "$running" "$snap" "$path"
+    done <<< "$lines"
+}
+
 cmd_export() {
     local out="${1:-}" lines
     lines="$(valid_lines)"
@@ -531,6 +576,7 @@ case "${1:-}" in
     remove) shift; cmd_remove "$@"; exit 0 ;;
     export) shift; cmd_export "$@"; exit 0 ;;
     import) shift; cmd_import "$@"; exit 0 ;;
+    status) cmd_status; exit 0 ;;
 esac
 
 # --- resolve the project directory + default session name ---
@@ -558,9 +604,7 @@ if [ ! -d "$PROJECT_DIR" ]; then
 fi
 PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
 
-SESSION_NAME="${SESSION_OVERRIDE:-$DEFAULT_SESSION_NAME}"
-# tmux session names can't contain '.' or ':'
-SESSION_NAME="${SESSION_NAME//[.:]/_}"
+SESSION_NAME="$(sanitize_session_name "${SESSION_OVERRIDE:-$DEFAULT_SESSION_NAME}")"
 
 # tmux-persist auto-restores on its `session-created` hook, async, the
 # instant a session with a matching snapshot name is created - and
@@ -569,19 +613,12 @@ SESSION_NAME="${SESSION_NAME//[.:]/_}"
 # layout at the same time would race it. So: if a persist snapshot
 # exists for this session name, just create the bare session and let
 # persist's hook populate it; only build our own default layout when
-# there's nothing for persist to restore.
-PERSIST_DIR="$(tmux show-option -gqv @persist-dir 2>/dev/null)"
-PERSIST_DIR="${PERSIST_DIR:-$HOME/.tmux/persist}"
-PERSIST_DIR="${PERSIST_DIR/#\~/$HOME}"
-
-has_persist_snapshot() {
-    [ -d "$PERSIST_DIR" ] || return 1
-    compgen -G "$PERSIST_DIR/${SESSION_NAME}_*" > /dev/null 2>&1
-}
+# there's nothing for persist to restore. (has_persist_snapshot and
+# PERSIST_DIR are defined above, shared with `dev-start status`.)
 
 if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
     echo "Session '$SESSION_NAME' already running."
-elif has_persist_snapshot; then
+elif has_persist_snapshot "$SESSION_NAME"; then
     echo "Found a tmux-persist snapshot for '$SESSION_NAME' - letting tmux-persist restore it."
     tmux new-session -d -s "$SESSION_NAME" -c "$PROJECT_DIR"
     # tmux-persist's session-created hook takes it from here.
@@ -625,16 +662,21 @@ setup_dev_start
 # -----------------------------------------------------------------
 
 setup_dev_start_completion() {
-    local marker="# >>> dev-start completion >>>"
+    local marker_start="# >>> dev-start completion >>>"
+    local marker_end="# <<< dev-start completion <<<"
 
     for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
         touch "$rc"
-        if grep -qF "$marker" "$rc"; then
-            log "dev-start completion already present in $(basename "$rc"), skipping"
-            continue
+
+        if grep -qF "$marker_start" "$rc"; then
+            # Strip the old managed block first, so re-running always
+            # picks up new subcommands instead of freezing whatever
+            # completion list was installed the first time.
+            sed -i.bak "/$marker_start/,/$marker_end/d" "$rc"
+            rm -f "$rc.bak"
         fi
 
-        log "Adding dev-start completion to $(basename "$rc")"
+        log "Updating dev-start completion in $(basename "$rc")"
         {
             echo ""
             if [ "$rc" = "$HOME/.zshrc" ]; then
@@ -646,7 +688,7 @@ _dev_start_complete() {
     local cur names
     cur="${COMP_WORDS[COMP_CWORD]}"
     names="$(awk -F= '!/^#/ && NF>1 {print $1}' "$HOME/.config/dev-start/projects" 2>/dev/null)"
-    COMPREPLY=( $(compgen -W "init list pick remove export import ${names}" -- "$cur") )
+    COMPREPLY=( $(compgen -W "init list status pick remove export import ${names}" -- "$cur") )
 }
 complete -F _dev_start_complete dev-start
 # <<< dev-start completion <<<
