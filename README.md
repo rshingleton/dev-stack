@@ -7,7 +7,7 @@ MIT licensed, see [LICENSE](./LICENSE).
 ## Prerequisites
 
 - **macOS**: [Homebrew](https://brew.sh) must already be installed. If it isn't, `setup-env.sh` just warns and skips package installation entirely, nothing else in the script depends on Homebrew, so dotfile linking and `dev-stack` still work.
-- **RHEL / Ubuntu**: `dnf`/`apt-get` and `sudo` access, which any normal install already has.
+- **RHEL / Ubuntu**: `dnf`/`apt-get`, plus `sudo` access to install system packages. Without sudo, see [No sudo access](#no-sudo-access).
 - `git` and `bash` on all three.
 
 ## Layout of this repo
@@ -98,3 +98,25 @@ chmod +x setup-env.sh
 ```
 
 Re-run any time; every step checks before it acts.
+
+## No sudo access
+
+On machines where you can't install system packages yourself, `setup-env.sh` still does everything that doesn't need root (dotfile links, `dev-stack`, completion, npm tools, tmux plugins) and hands the rest off instead of failing:
+
+- It checks once up front: root, passwordless sudo, or a sudo password prompt if there's a terminal. With no way to get sudo (or when Homebrew on macOS is owned by another user), missing packages are collected rather than installed.
+- At the end it prints the exact install command(s) and writes them to `~/dev-stack-prereqs.sh`. Hand that to an admin to run as root (`sudo bash ~/dev-stack-prereqs.sh`), or on macOS to the user that owns Homebrew.
+- Re-run `./setup-env.sh` once they're installed to finish the setup. The hand-off file is removed once nothing is missing.
+- If the system Perl's library isn't writable, `Perl::Tidy` and `Perl::Critic` are installed into `~/perl5`, with `PATH`/`PERL5LIB` added to `~/.profile`.
+
+The hand-off installs one package at a time, so one the repos don't carry doesn't block the rest; it reports any that failed. On RHEL, `neovim`, `fd-find` and `ripgrep` come from outside the base repos, and the hand-off notes that EPEL needs enabling first.
+
+`lazygit` never needs root on RHEL/Ubuntu (it isn't in EPEL or every Ubuntu release): it's built with `go install` into `~/.local/bin` when Go is on `PATH`, and otherwise (or if that fails) the checksum-verified [release binary](https://github.com/jesseduffield/lazygit/releases) is installed there instead.
+
+Options:
+
+```
+./setup-env.sh --no-sudo          Don't attempt installs; always produce the hand-off (or DEV_STACK_NO_SUDO=1)
+./setup-env.sh --print-prereqs    Only print what's missing, change nothing
+```
+
+Both pass through the one-liner too: `curl -fsSL .../install.sh | bash -s -- --no-sudo`.

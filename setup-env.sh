@@ -28,9 +28,6 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo "Starting environment setup..."
-echo "Using dotfiles from: $SCRIPT_DIR"
-
 log()  { echo "==> $*"; }
 warn() { echo "WARNING: $*" >&2; }
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -64,6 +61,32 @@ link_dotfile() {
     ln -s "$src" "$dest"
     log "Linked $dest -> $src"
 }
+
+# -----------------------------------------------------------------
+# 0. Options
+#    --no-sudo        Don't install system packages; list the missing
+#                     ones for an admin instead (also DEV_STACK_NO_SUDO=1).
+#    --print-prereqs  Only report which system packages are missing,
+#                     then exit without changing anything.
+# -----------------------------------------------------------------
+
+usage() {
+    echo "Usage: setup-env.sh [--no-sudo] [--print-prereqs]"
+}
+
+NO_SUDO="${DEV_STACK_NO_SUDO:-0}"
+PRINT_PREREQS=0
+for arg in "$@"; do
+    case "$arg" in
+        --no-sudo)       NO_SUDO=1 ;;
+        --print-prereqs) PRINT_PREREQS=1 ;;
+        -h|--help)       usage; exit 0 ;;
+        *)               warn "Unknown option: $arg"; usage >&2; exit 1 ;;
+    esac
+done
+
+echo "Starting environment setup..."
+echo "Using dotfiles from: $SCRIPT_DIR"
 
 # -----------------------------------------------------------------
 # 1. Perl & Python discovery (same principle, applied to both)
@@ -109,6 +132,149 @@ fi
 log "Detected OS family: $OS_FAMILY"
 
 # -----------------------------------------------------------------
+# 2b. Package install rights
+#     All system package installs go through pkg_install. When this
+#     run can't install them itself (no root or sudo, Homebrew owned by
+#     another user, --no-sudo, --print-prereqs), the packages are
+#     collected instead and handed off at the end - printed, and
+#     written to ~/dev-stack-prereqs.sh for an admin to run - while
+#     every step that doesn't need root still runs. Re-running after
+#     the admin has installed them finishes the setup.
+# -----------------------------------------------------------------
+
+SUDO=""
+CAN_INSTALL=1
+MISSING_PKGS=()
+HANDOFF_NOTES=()
+PREREQS_FILE="$HOME/dev-stack-prereqs.sh"
+
+resolve_install_rights() {
+    if [ "$PRINT_PREREQS" = 1 ]; then
+        CAN_INSTALL=0
+    elif [ "$NO_SUDO" = 1 ]; then
+        log "--no-sudo set; missing packages will be listed for an admin instead of installed"
+        CAN_INSTALL=0
+    elif [ "$OS_FAMILY" = "macos" ]; then
+        # brew never uses sudo, but needs write access to its own prefix.
+        if have brew && [ ! -w "$(brew --prefix)" ]; then
+            warn "Homebrew at $(brew --prefix) isn't writable by $(id -un); missing packages will be listed for its owner instead."
+            CAN_INSTALL=0
+        fi
+    elif [ "$(id -u)" -eq 0 ]; then
+        SUDO=""
+    elif ! have sudo; then
+        warn "sudo not found; missing packages will be listed for an admin instead of installed."
+        CAN_INSTALL=0
+    elif sudo -n true 2>/dev/null; then
+        SUDO="sudo"
+    elif (: </dev/tty) 2>/dev/null \
+        && log "Package installs need sudo (re-run with --no-sudo to skip this prompt)" \
+        && sudo -v; then
+        # sudo prompts on /dev/tty, so this also works under curl | bash.
+        SUDO="sudo"
+    else
+        warn "Couldn't get sudo; missing packages will be listed for an admin instead of installed."
+        CAN_INSTALL=0
+    fi
+}
+
+# pkg_install <pkg>... - install with the OS package manager, or record
+# the packages for the admin hand-off when this run can't install them.
+pkg_install() {
+    local tool
+    case "$OS_FAMILY" in
+        macos)  tool="brew" ;;
+        rhel)   tool="dnf" ;;
+        ubuntu) tool="apt" ;;
+    esac
+
+    if [ "$CAN_INSTALL" = 0 ]; then
+        log "$tool: $* missing, adding to the prerequisites list"
+        MISSING_PKGS+=("$@")
+        return
+    fi
+
+    log "$tool: installing $*"
+    case "$OS_FAMILY" in
+        macos)  brew install "$@" ;;
+        rhel)   $SUDO dnf install -y "$@" ;;
+        ubuntu) $SUDO apt-get install -y "$@" ;;
+    esac
+}
+
+# Print the collected packages as the commands to install them, and
+# (unless --print-prereqs) write the same commands to $PREREQS_FILE.
+report_missing_prereqs() {
+    if [ ${#MISSING_PKGS[@]} -eq 0 ] && [ ${#HANDOFF_NOTES[@]} -eq 0 ]; then
+        if [ "$PRINT_PREREQS" = 1 ]; then
+            log "No missing prerequisites."
+        else
+            # Drop a hand-off file left by an earlier run; it's done.
+            rm -f "$PREREQS_FILE"
+        fi
+        return
+    fi
+
+    local user runner pkgs note
+    user="$(id -un)"
+    pkgs="${MISSING_PKGS[*]:-}"
+    if [ "$OS_FAMILY" = "macos" ]; then
+        runner="the user that owns Homebrew"
+    elif [ "$PRINT_PREREQS" = 1 ]; then
+        runner="root"
+    else
+        runner="root (e.g. sudo bash $PREREQS_FILE)"
+    fi
+
+    if [ "$OS_FAMILY" = "rhel" ] && echo " $pkgs " | grep -qE ' (neovim|fd-find|ripgrep) '; then
+        HANDOFF_NOTES+=("neovim, fd-find and ripgrep aren't in the base RHEL repos. Enable EPEL first (https://docs.fedoraproject.org/en-US/epel/).")
+    fi
+
+    local script=()
+    script+=("#!/bin/bash")
+    script+=("# dev-stack prerequisites for $user on $(hostname) ($OS_FAMILY), written by setup-env.sh.")
+    script+=("# Run as $runner, then have $user re-run ./setup-env.sh.")
+    if [ ${#HANDOFF_NOTES[@]} -gt 0 ]; then
+        for note in "${HANDOFF_NOTES[@]}"; do
+            script+=("# NOTE: $note")
+        done
+    fi
+    if [ -n "$pkgs" ]; then
+        # One package at a time, so a package the repos don't carry
+        # doesn't stop the rest from installing.
+        local install_cmd
+        case "$OS_FAMILY" in
+            macos)  install_cmd="brew install" ;;
+            rhel)   install_cmd="dnf install -y" ;;
+            ubuntu) install_cmd="apt-get install -y"; script+=("apt-get update -y") ;;
+        esac
+        script+=("failed=\"\"")
+        script+=("for pkg in $pkgs; do")
+        script+=("    $install_cmd \"\$pkg\" || failed=\"\$failed \$pkg\"")
+        script+=("done")
+        script+=("if [ -n \"\$failed\" ]; then")
+        script+=("    echo \"Couldn't install:\$failed - see the NOTE lines at the top of this script.\" >&2")
+        script+=("    exit 1")
+        script+=("fi")
+    fi
+
+    echo
+    echo "-----------------------------------------------------------------"
+    echo "Missing prerequisites - these need to be installed by $runner:"
+    echo
+    printf '%s\n' "${script[@]}"
+    echo "-----------------------------------------------------------------"
+
+    if [ "$PRINT_PREREQS" = 0 ]; then
+        printf '%s\n' "${script[@]}" > "$PREREQS_FILE"
+        chmod +x "$PREREQS_FILE"
+        warn "Wrote $PREREQS_FILE - hand it to $runner, then re-run ./setup-env.sh to finish."
+    fi
+}
+
+resolve_install_rights
+
+# -----------------------------------------------------------------
 # 3. Perl tooling needed by lua/plugins/perl.lua, installed via cpanm
 #    so it works the same way across all three OS families, and only
 #    runs if the module isn't already present (idempotent).
@@ -122,18 +288,33 @@ install_perl_cpan_tools() {
         return
     fi
 
+    # A system perl's site library needs root to write to, so install
+    # into ~/perl5 instead when it isn't writable (perlbrew and brew
+    # perls are user-owned and keep installing to their own library).
+    local cpanm_args=(--notest)
+    local sitelib
+    sitelib="$(perl -MConfig -e 'print $Config{installsitelib}' 2>/dev/null)"
+    if [ -n "$sitelib" ] && [ ! -w "$sitelib" ]; then
+        log "Perl site library $sitelib isn't writable; using ~/perl5 for Perl tools"
+        cpanm_args+=(--local-lib "$HOME/perl5")
+        export PATH="$HOME/perl5/bin:$PATH"
+        export PERL5LIB="$HOME/perl5/lib/perl5${PERL5LIB:+:$PERL5LIB}"
+        ensure_line_in_file "$HOME/.profile" 'export PATH="$HOME/perl5/bin:$PATH"'
+        ensure_line_in_file "$HOME/.profile" 'export PERL5LIB="$HOME/perl5/lib/perl5${PERL5LIB:+:$PERL5LIB}"'
+    fi
+
     if have perltidy; then
         log "perltidy already installed, skipping"
     else
         log "Installing Perl::Tidy via cpanm"
-        cpanm --notest Perl::Tidy
+        cpanm "${cpanm_args[@]}" Perl::Tidy
     fi
 
     if have perlcritic; then
         log "perlcritic already installed, skipping"
     else
         log "Installing Perl::Critic via cpanm"
-        cpanm --notest Perl::Critic
+        cpanm "${cpanm_args[@]}" Perl::Critic
     fi
 }
 
@@ -146,6 +327,7 @@ provision_macos() {
 
     if ! have brew; then
         warn "Homebrew is required on macOS. Install it from https://brew.sh, then re-run this script."
+        HANDOFF_NOTES+=("Install Homebrew from https://brew.sh, then re-run ./setup-env.sh to list the remaining packages.")
         return
     fi
 
@@ -154,24 +336,23 @@ provision_macos() {
         if brew list --versions "$pkg" >/dev/null 2>&1; then
             log "brew: $pkg already installed, skipping"
         else
-            log "brew: installing $pkg"
-            brew install "$pkg"
+            pkg_install "$pkg"
         fi
     done
 
     if [ -z "$ACTIVE_PERL_BIN" ]; then
-        log "No base Perl found. Installing perl + cpanminus via brew"
-        brew install perl cpanminus
+        log "No base Perl found. Need perl + cpanminus"
+        pkg_install perl cpanminus
     elif ! have cpanm; then
-        log "Perl present but cpanm missing. Installing cpanminus via brew"
-        brew install cpanminus
+        log "Perl present but cpanm missing. Need cpanminus"
+        pkg_install cpanminus
     else
         log "Perl ($ACTIVE_PERL_BIN) and cpanm already present, skipping brew perl/cpanminus"
     fi
 
     if [ -z "$ACTIVE_PYTHON_BIN" ]; then
-        log "No base Python3 found. Installing python3 via brew"
-        brew install python3
+        log "No base Python3 found. Need python3"
+        pkg_install python3
     else
         log "Python3 ($ACTIVE_PYTHON_BIN) already present, skipping brew python3"
     fi
@@ -185,32 +366,34 @@ provision_rhel() {
         return
     fi
 
-    sudo dnf check-update || true
+    if [ "$CAN_INSTALL" = 1 ]; then
+        $SUDO dnf check-update || true
+    fi
 
-    local pkgs=(tmux neovim lazygit fzf fd-find ripgrep gcc make golang nodejs)
+    # lazygit isn't in the RHEL/EPEL repos; install_lazygit handles it.
+    local pkgs=(tmux neovim fzf fd-find ripgrep gcc make golang nodejs)
     for pkg in "${pkgs[@]}"; do
         if rpm -q "$pkg" >/dev/null 2>&1; then
             log "dnf: $pkg already installed, skipping"
         else
-            log "dnf: installing $pkg"
-            sudo dnf install -y "$pkg"
+            pkg_install "$pkg"
         fi
     done
 
     if [ -z "$ACTIVE_PERL_BIN" ]; then
-        log "No base Perl found. Installing perl-interpreter + cpanminus"
-        sudo dnf install -y perl-interpreter perl-App-cpanminus
+        log "No base Perl found. Need perl-interpreter + cpanminus"
+        pkg_install perl-interpreter perl-App-cpanminus
     elif ! have cpanm; then
-        log "Perl present but cpanm missing. Installing perl-App-cpanminus"
-        sudo dnf install -y perl-App-cpanminus
+        log "Perl present but cpanm missing. Need perl-App-cpanminus"
+        pkg_install perl-App-cpanminus
     fi
 
     if [ -z "$ACTIVE_PYTHON_BIN" ]; then
-        log "No base Python3 found. Installing python3 + pip"
-        sudo dnf install -y python3 python3-pip
+        log "No base Python3 found. Need python3 + pip"
+        pkg_install python3 python3-pip
     elif ! have pip3; then
-        log "Python3 present but pip3 missing. Installing python3-pip"
-        sudo dnf install -y python3-pip
+        log "Python3 present but pip3 missing. Need python3-pip"
+        pkg_install python3-pip
     else
         log "Python3 ($ACTIVE_PYTHON_BIN) and pip3 already present, skipping dnf python3/pip"
     fi
@@ -224,32 +407,34 @@ provision_ubuntu() {
         return
     fi
 
-    sudo apt-get update -y
+    if [ "$CAN_INSTALL" = 1 ]; then
+        $SUDO apt-get update -y
+    fi
 
-    local pkgs=(tmux neovim lazygit fzf fd-find ripgrep build-essential golang-go nodejs npm)
+    # lazygit isn't packaged for every Ubuntu release; install_lazygit handles it.
+    local pkgs=(tmux neovim fzf fd-find ripgrep build-essential golang-go nodejs npm)
     for pkg in "${pkgs[@]}"; do
         if dpkg -s "$pkg" >/dev/null 2>&1; then
             log "apt: $pkg already installed, skipping"
         else
-            log "apt: installing $pkg"
-            sudo apt-get install -y "$pkg"
+            pkg_install "$pkg"
         fi
     done
 
     if [ -z "$ACTIVE_PERL_BIN" ]; then
-        log "No base Perl found. Installing perl + cpanminus"
-        sudo apt-get install -y perl cpanminus
+        log "No base Perl found. Need perl + cpanminus"
+        pkg_install perl cpanminus
     elif ! have cpanm; then
-        log "Perl present but cpanm missing. Installing cpanminus"
-        sudo apt-get install -y cpanminus
+        log "Perl present but cpanm missing. Need cpanminus"
+        pkg_install cpanminus
     fi
 
     if [ -z "$ACTIVE_PYTHON_BIN" ]; then
-        log "No base Python3 found. Installing python3 + pip"
-        sudo apt-get install -y python3 python3-pip
+        log "No base Python3 found. Need python3 + pip"
+        pkg_install python3 python3-pip
     elif ! have pip3; then
-        log "Python3 present but pip3 missing. Installing python3-pip"
-        sudo apt-get install -y python3-pip
+        log "Python3 present but pip3 missing. Need python3-pip"
+        pkg_install python3-pip
     else
         log "Python3 ($ACTIVE_PYTHON_BIN) and pip3 already present, skipping apt python3/pip"
     fi
@@ -262,7 +447,102 @@ case "$OS_FAMILY" in
     *) warn "Unrecognized OS ($OSTYPE). Skipping package provisioning; continuing with config steps." ;;
 esac
 
+if [ "$PRINT_PREREQS" = 1 ]; then
+    report_missing_prereqs
+    exit 0
+fi
+
 install_perl_cpan_tools
+
+# -----------------------------------------------------------------
+# 4b. lazygit on RHEL / Ubuntu (macOS gets it from brew above)
+#     Not in the RHEL/EPEL repos or every Ubuntu release, and it needs
+#     no root: build it with `go install` when Go is on PATH, otherwise
+#     (or if that fails) use the checksum-verified release binary.
+#     Either way it lands in ~/.local/bin.
+# -----------------------------------------------------------------
+
+LAZYGIT_REPO="github.com/jesseduffield/lazygit"
+
+# fetch <url> <dest>
+fetch() {
+    if have curl; then
+        curl -fsSL -o "$2" "$1"
+    elif have wget; then
+        wget -qO "$2" "$1"
+    else
+        return 1
+    fi
+}
+
+install_lazygit_release() {
+    local arch version asset tmp status=1
+    case "$(uname -m)" in
+        x86_64)        arch="x86_64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        armv6l|armv7l) arch="armv6" ;;
+        *) warn "No lazygit release binary for $(uname -m)"; return 1 ;;
+    esac
+
+    if ! have curl && ! have wget; then
+        warn "Need curl or wget to download the lazygit release binary"
+        pkg_install curl
+        return 1
+    fi
+
+    # Newest release tag via git (already required), not the
+    # rate-limited GitHub API.
+    version="$(git ls-remote --tags --refs "https://$LAZYGIT_REPO" 'v*' 2>/dev/null \
+        | sed 's|.*refs/tags/v||' | sort -V | tail -1)"
+    if [ -z "$version" ]; then
+        warn "Couldn't determine the latest lazygit release"
+        return 1
+    fi
+
+    asset="lazygit_${version}_linux_${arch}.tar.gz"
+    tmp="$(mktemp -d)"
+    log "Downloading lazygit $version release binary ($arch)"
+    if fetch "https://$LAZYGIT_REPO/releases/download/v$version/$asset" "$tmp/$asset" \
+        && fetch "https://$LAZYGIT_REPO/releases/download/v$version/checksums.txt" "$tmp/checksums.txt" \
+        && (cd "$tmp" && grep " $asset\$" checksums.txt | sha256sum -c --status -) \
+        && tar -xzf "$tmp/$asset" -C "$tmp" lazygit \
+        && install -m 755 "$tmp/lazygit" "$HOME/.local/bin/lazygit"; then
+        status=0
+    fi
+    rm -rf "$tmp"
+    return $status
+}
+
+install_lazygit() {
+    if [ "$OS_FAMILY" != "rhel" ] && [ "$OS_FAMILY" != "ubuntu" ]; then
+        return
+    fi
+    if have lazygit || [ -x "$HOME/.local/bin/lazygit" ]; then
+        log "lazygit already installed, skipping"
+        return
+    fi
+
+    mkdir -p "$HOME/.local/bin"
+    ensure_line_in_file "$HOME/.profile" 'export PATH="$HOME/.local/bin:$PATH"'
+
+    if have go; then
+        log "Building lazygit with go install"
+        # Distro Go packages can pin GOTOOLCHAIN=local; let Go fetch the
+        # newer toolchain lazygit may require.
+        if GOTOOLCHAIN=auto GOBIN="$HOME/.local/bin" go install "$LAZYGIT_REPO@latest"; then
+            return
+        fi
+        warn "go install failed; falling back to the lazygit release binary"
+    else
+        log "go not found; using the lazygit release binary"
+    fi
+
+    if ! install_lazygit_release; then
+        warn "Couldn't install lazygit; get it from https://$LAZYGIT_REPO/releases and put it on PATH."
+    fi
+}
+
+install_lazygit
 
 # -----------------------------------------------------------------
 # 5. Global web tooling (HTML/CSS/JS ecosystem)
@@ -747,6 +1027,8 @@ install_tmux_plugins
 #   - winget/scoop installs for neovim, git, go, python, node
 #   - WSL2 + Ubuntu distro for tmux, perl toolchain, dev-stack
 #   - Reuse this script's OS_FAMILY=ubuntu path *inside* WSL
+
+report_missing_prereqs
 
 echo "Environment setup complete for OS family: $OS_FAMILY"
 echo "Perl binary in use: ${ACTIVE_PERL_BIN:-$(command -v perl 2>/dev/null || echo 'still not found')}"
