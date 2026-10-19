@@ -2,6 +2,14 @@
 
 A unified development environment: a provisioning script plus the actual dotfiles it manages, for macOS (laptop), Red Hat (workstation), and Ubuntu (VPS). Clone this repo anywhere and run `setup-env.sh` to get the same nvim config, tmux setup, and project launcher on a new machine.
 
+MIT licensed, see [LICENSE](./LICENSE).
+
+## Prerequisites
+
+- **macOS**: [Homebrew](https://brew.sh) must already be installed. If it isn't, `setup-env.sh` just warns and skips package installation entirely, nothing else in the script depends on Homebrew, so dotfile linking and `dev-start` still work.
+- **RHEL / Ubuntu**: `dnf`/`apt-get` and `sudo` access, which any normal install already has.
+- `git` and `bash` on all three.
+
 ## Layout of this repo
 
 ```
@@ -17,7 +25,7 @@ tmux/tmux.conf  tmux config (dotfile source of truth, symlinked to ~/.tmux.conf)
 `setup-env.sh` is idempotent, safe to re-run any time:
 
 - Detects your OS (macOS / RHEL / Ubuntu) and installs the right packages with the right package manager (`brew`, `dnf`, `apt-get`).
-- Follows the Perl Principle: never forces a system-wide Perl reinstall if a working binary is already on `PATH`. Only installs `Perl::Tidy` and `Perl::Critic` via `cpanm` if they're missing, since `nvim/lua/plugins/perl.lua` already wires up `perlnavigator`, `perltidy`, and `perlcritic`.
+- Follows the Perl Principle, applied equally to Python: never forces a system-wide Perl or Python reinstall if a working binary is already on `PATH` (important if you manage either with something like perlbrew, pyenv, or conda, since the OS package manager installing "on top" can silently change what `perl`/`python3` resolve to, or even overwrite existing symlinks via `brew link`). Only installs `Perl::Tidy` and `Perl::Critic` via `cpanm` if they're missing, since `nvim/lua/plugins/perl.lua` already wires up `perlnavigator`, `perltidy`, and `perlcritic`.
 - Installs global web tooling (`prettier`, `live-server`) to a user-owned npm prefix, not root.
 - Symlinks `~/.config/nvim` to this repo's `nvim/`, and `~/.tmux.conf` to `tmux/tmux.conf`. If a real (non-symlink) config already exists at either location, it's renamed to a timestamped `.bak` next to it first - **never deleted**, so a first run on a machine with its own hand-built config is safe; nothing is lost, you just end up with a `.bak` directory to compare against and discard once you're happy.
 - Keeps tmux on the factory-default `Ctrl+b` prefix intentionally, so it never collides with LazyVim's `Ctrl+h/j/k/l` pane navigation from `vim-tmux-navigator`, plus installs `tmux-persist`, `tmux-yank`, and `extrakto`.
