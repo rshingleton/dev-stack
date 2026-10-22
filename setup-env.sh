@@ -109,6 +109,16 @@ echo "Using dotfiles from: $SCRIPT_DIR"
 #    `link` step will even overwrite existing python3/pip3 symlinks).
 # -----------------------------------------------------------------
 
+# Non-interactive runs (curl | bash) never reach the perlbrew init in
+# ~/.bashrc, so `perl` would fall back to the system one. Load it first.
+PERLBREW_INIT="${PERLBREW_ROOT:-$HOME/perl5/perlbrew}/etc/bashrc"
+if [ -z "${PERLBREW_PERL:-}" ] && [ -s "$PERLBREW_INIT" ]; then
+    set +u
+    # shellcheck disable=SC1090
+    . "$PERLBREW_INIT"
+    set -u
+fi
+
 ACTIVE_PERL_BIN="$(command -v perl 2>/dev/null || true)"
 if [ -n "$ACTIVE_PERL_BIN" ]; then
     PERL_VERSION_STRING="$("$ACTIVE_PERL_BIN" -e 'print $^V' 2>/dev/null || echo "unknown")"
@@ -300,6 +310,9 @@ install_perl_cpan_tools() {
     # A system perl's site library needs root to write to, so install
     # into ~/perl5 instead when it isn't writable (perlbrew and brew
     # perls are user-owned and keep installing to their own library).
+    # Run cpanm under the perl on PATH: a system cpanm's shebang would
+    # otherwise install for /usr/bin/perl, whatever perlbrew points at.
+    local cpanm_cmd=(perl "$(command -v cpanm)")
     local cpanm_args=(--notest)
     local sitelib
     sitelib="$(perl -MConfig -e 'print $Config{installsitelib}' 2>/dev/null)"
@@ -316,14 +329,14 @@ install_perl_cpan_tools() {
         log "perltidy already installed, skipping"
     else
         log "Installing Perl::Tidy via cpanm"
-        cpanm "${cpanm_args[@]}" Perl::Tidy
+        "${cpanm_cmd[@]}" "${cpanm_args[@]}" Perl::Tidy
     fi
 
     if have perlcritic; then
         log "perlcritic already installed, skipping"
     else
         log "Installing Perl::Critic via cpanm"
-        cpanm "${cpanm_args[@]}" Perl::Critic
+        "${cpanm_cmd[@]}" "${cpanm_args[@]}" Perl::Critic
     fi
 }
 
