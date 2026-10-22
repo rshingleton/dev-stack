@@ -39,6 +39,15 @@ ensure_line_in_file() {
     grep -qxF "$line" "$file" || echo "$line" >> "$file"
 }
 
+# ensure_path_line <line>
+# ~/.profile covers login shells; ~/.bashrc covers the non-login
+# interactive shells most terminals and tmux panes start. Write to both
+# so the line takes effect without a fresh login.
+ensure_path_line() {
+    ensure_line_in_file "$HOME/.profile" "$1"
+    ensure_line_in_file "$HOME/.bashrc" "$1"
+}
+
 # link_dotfile <source-in-repo> <target-in-home>
 # Idempotent: if target is already a symlink to source, does nothing.
 # If target is a real file/directory, backs it up (never deletes) and
@@ -299,8 +308,8 @@ install_perl_cpan_tools() {
         cpanm_args+=(--local-lib "$HOME/perl5")
         export PATH="$HOME/perl5/bin:$PATH"
         export PERL5LIB="$HOME/perl5/lib/perl5${PERL5LIB:+:$PERL5LIB}"
-        ensure_line_in_file "$HOME/.profile" 'export PATH="$HOME/perl5/bin:$PATH"'
-        ensure_line_in_file "$HOME/.profile" 'export PERL5LIB="$HOME/perl5/lib/perl5${PERL5LIB:+:$PERL5LIB}"'
+        ensure_path_line 'export PATH="$HOME/perl5/bin:$PATH"'
+        ensure_path_line 'export PERL5LIB="$HOME/perl5/lib/perl5${PERL5LIB:+:$PERL5LIB}"'
     fi
 
     if have perltidy; then
@@ -523,7 +532,7 @@ install_lazygit() {
     fi
 
     mkdir -p "$HOME/.local/bin"
-    ensure_line_in_file "$HOME/.profile" 'export PATH="$HOME/.local/bin:$PATH"'
+    ensure_path_line 'export PATH="$HOME/.local/bin:$PATH"'
 
     if have go; then
         log "Building lazygit with go install"
@@ -557,8 +566,26 @@ setup_web_tools() {
     fi
 
     local npm_prefix="$HOME/.npm-global"
-    mkdir -p "$npm_prefix"
-    npm config set prefix "$npm_prefix" >/dev/null 2>&1
+
+    # nvm-managed npm already installs globals into a user-writable
+    # prefix, and nvm refuses to run when .npmrc sets "prefix". Leave the
+    # prefix alone there, and undo the one an earlier run of this script set.
+    if [ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]; then
+        log "nvm detected; using its npm prefix instead of $npm_prefix"
+        # A non-interactive shell hasn't loaded nvm, so npm may be the system one.
+        set +u
+        # shellcheck disable=SC1091
+        . "${NVM_DIR:-$HOME/.nvm}/nvm.sh" >/dev/null 2>&1
+        set -u
+        if [ "$(npm config get prefix 2>/dev/null)" = "$npm_prefix" ]; then
+            npm config delete prefix >/dev/null 2>&1
+        fi
+    else
+        mkdir -p "$npm_prefix"
+        npm config set prefix "$npm_prefix" >/dev/null 2>&1
+        ensure_path_line 'export PATH="$HOME/.npm-global/bin:$PATH"'
+        export PATH="$npm_prefix/bin:$PATH"
+    fi
 
     for tool in neovim live-server prettier; do
         if npm ls -g --depth=0 "$tool" >/dev/null 2>&1; then
@@ -568,14 +595,6 @@ setup_web_tools() {
             npm install -g "$tool"
         fi
     done
-
-    local path_line='export PATH="$HOME/.npm-global/bin:$PATH"'
-    if grep -qxF "$path_line" "$HOME/.profile" 2>/dev/null; then
-        log "$npm_prefix/bin already on PATH in ~/.profile, skipping"
-    else
-        ensure_line_in_file "$HOME/.profile" "$path_line"
-        log "Added $npm_prefix/bin to PATH in ~/.profile (restart shell or 'source ~/.profile')"
-    fi
 }
 
 setup_web_tools
@@ -942,7 +961,7 @@ DEV_START_EOF
     # than a shell alias) so it also works from scripts and non-interactive
     # shells. -f replaces the real dev-start file older installs wrote.
     ln -sfn dev-stack "$HOME/.local/bin/dev-start"
-    ensure_line_in_file "$HOME/.profile" 'export PATH="$HOME/.local/bin:$PATH"'
+    ensure_path_line 'export PATH="$HOME/.local/bin:$PATH"'
 }
 
 setup_dev_start
@@ -1032,4 +1051,4 @@ report_missing_prereqs
 
 echo "Environment setup complete for OS family: $OS_FAMILY"
 echo "Perl binary in use: ${ACTIVE_PERL_BIN:-$(command -v perl 2>/dev/null || echo 'still not found')}"
-echo "Run 'dev-stack' to launch your tmux project sessions."
+echo "Open a new shell (or run 'source ~/.bashrc') so PATH picks up ~/.local/bin, then run 'dev-stack'."
